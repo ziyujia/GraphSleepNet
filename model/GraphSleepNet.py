@@ -54,16 +54,16 @@ class TemporalAttention(Layer):
     def call(self, x):
         _, num_of_timesteps, num_of_vertices, num_of_features = x.shape
         
-        # shape of lhs is (batch_size, V, T)
+        # shape of lhs is (batch_size, T, V)
         lhs=K.dot(tf.transpose(x,perm=[0,1,3,2]), self.U_1)
         lhs=tf.reshape(lhs,[tf.shape(x)[0],num_of_timesteps,num_of_features])
         lhs = K.dot(lhs, self.U_2)
         
-        # shape of rhs is (batch_size, T, V)
-        rhs = K.dot(self.U_3, tf.transpose(x,perm=[2,0,3,1]))
+        # shape of rhs is (batch_size, V, T)
+        rhs = K.dot(self.U_3, tf.transpose(x,perm=[2,0,3,1])) # K.dot((F),(V,batch_size,F,T))=(V,batch_size,T)
         rhs=tf.transpose(rhs,perm=[1,0,2])
         
-        # shape of product is (batch_size, V, V)
+        # shape of product is (batch_size, T, T)
         product = K.batch_dot(lhs, rhs)
         
         S = tf.transpose(K.dot(self.V_e, tf.transpose(K.sigmoid(product + self.b_e),perm=[1, 2, 0])),perm=[2, 0, 1])
@@ -121,7 +121,7 @@ class SpatialAttention(Layer):
         lhs = K.dot(lhs, self.W_2)
         
         # shape of rhs is (batch_size, T, V)
-        rhs = K.dot(self.W_3, tf.transpose(x,perm=[1,0,3,2]))
+        rhs = K.dot(self.W_3, tf.transpose(x,perm=[1,0,3,2])) # K.dot((F),(V,batch_size,F,T))=(V,batch_size,T)
         rhs=tf.transpose(rhs,perm=[1,0,2])
         
         # shape of product is (batch_size, V, V)
