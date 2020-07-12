@@ -130,8 +130,8 @@ if __name__ == "__main__":
     # the parameters to extract DE and PSD
     stft_para={
         'stftn' :7680,
-        'fStart':[0.5, 4,  8, 14, 31],
-        'fEnd'  :[4,   8, 14, 31, 50],
+        'fStart':[0.5, 2, 4,  6,  8, 11, 14, 22, 31],
+        'fEnd'  :[4,   6, 8, 11, 14, 22, 31, 40, 50],
         'fs'    :256,
         'window':30,
     }
