@@ -228,9 +228,9 @@ class cheb_conv_with_SAt_GL(Layer):
         for i in range(2, self.k):
             cheb_polynomials.append(2 * L_t * cheb_polynomials[i - 1] - cheb_polynomials[i - 2])
         #GCN
+        outputs=[]
         for time_step in range(num_of_timesteps):
             # shape of x is (batch_size, V, F)
-            outputs=[]
             graph_signal = x[:, time_step, :, :]
             output = K.zeros(shape = (tf.shape(x)[0], num_of_vertices, self.num_of_filters))
             
@@ -248,9 +248,9 @@ class cheb_conv_with_SAt_GL(Layer):
                 rhs = K.batch_dot(tf.transpose(T_k_with_at,perm=[0, 2, 1]), graph_signal)
 
                 output = output + K.dot(rhs, theta_k)
-            outputs.append(tf.expand_dims(output,-1))
+            outputs.append(tf.expand_dims(output,1))
             
-        return tf.transpose(K.relu(K.concatenate(outputs, axis = -1)),perm=[0,3,1,2])
+        return K.relu(K.concatenate(outputs, axis = 1))
 
     def compute_output_shape(self, input_shape):
         assert isinstance(input_shape, list)
@@ -288,10 +288,10 @@ class cheb_conv_with_SAt_static(Layer):
         assert len(x)==2,'cheb_gcn error'
         x,spatial_attention = x
         _, num_of_timesteps, num_of_vertices, num_of_features = x.shape
-            
+        
+        outputs=[]
         for time_step in range(num_of_timesteps):
             # shape is (batch_size, V, F)
-            outputs=[]
             graph_signal = x[:, time_step, :, :]
             output = K.zeros(shape = (tf.shape(x)[0], num_of_vertices, self.num_of_filters))
             
@@ -309,9 +309,9 @@ class cheb_conv_with_SAt_static(Layer):
                 rhs = K.batch_dot(tf.transpose(T_k_with_at,perm=[0, 2, 1]), graph_signal)
 
                 output = output + K.dot(rhs, theta_k)
-            outputs.append(tf.expand_dims(output,-1))
+            outputs.append(tf.expand_dims(output,1))
             
-        return tf.transpose(K.relu(K.concatenate(outputs, axis = -1)),perm=[0,3,1,2])
+        return K.relu(K.concatenate(outputs, axis = 1))
 
     def compute_output_shape(self, input_shape):
         assert isinstance(input_shape, list)
