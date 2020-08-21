@@ -368,9 +368,9 @@ def GraphSleepBlock(x, k, num_of_chev_filters, num_of_time_filters, time_conv_st
     ''' Output: batch_size, num_of_timesteps, num_of_vertices, num_of_time_filters)'''
     time_conv_output = layers.Conv2D(
         filters = num_of_time_filters, 
-        kernel_size = (1, time_conv_kernel), 
+        kernel_size = (time_conv_kernel, 1), 
         padding = 'same', 
-        strides = (1, time_conv_strides)
+        strides = (time_conv_strides, 1)
     )(spatial_gcn)
 
     # residual shortcut
