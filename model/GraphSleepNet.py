@@ -222,6 +222,9 @@ class cheb_conv_with_SAt_GL(Layer):
         #Calculating Chebyshev polynomials
         D = tf.matrix_diag(K.sum(W,axis=1))
         L = D - W
+        '''
+        Here may report an error which may due to TensorFlow's version, consider to change the size of batch_size or directly edit the following line to "lambda_max = 2".
+        '''
         lambda_max = K.max(tf.self_adjoint_eigvals(L),axis=1)
         L_t = (2 * L) / tf.reshape(lambda_max,[-1,1,1]) - [tf.eye(int(num_of_vertices))]
         cheb_polynomials = [tf.eye(int(num_of_vertices)), L_t]
