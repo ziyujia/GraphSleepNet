@@ -49,7 +49,7 @@ GraphSleepNet: Adaptive Spatial-Temporal Graph Convolutional Networks for Sleep 
 - Configuration
 
   Write the config file in the format of the example.
-    
+  
     - We provide a sample config file in `/config/SS3.config`
 
 - Network training and testing
@@ -60,6 +60,6 @@ GraphSleepNet: Adaptive Spatial-Temporal Graph Convolutional Networks for Sleep 
   + -g: The number of the GPU to use. E.g., `0`, `1,3`. Set this to `-1` if only CPU is used. 
 
   ```shell
-  python train.py -c SS3.config -g -1
+  python train.py -c ./config/SS3.config -g -1
   ```
 

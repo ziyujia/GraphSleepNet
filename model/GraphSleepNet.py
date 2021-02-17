@@ -1,3 +1,4 @@
+import sys
 import numpy as np
 import keras
 import tensorflow as tf
@@ -15,6 +16,8 @@ from keras.layers.core import Lambda
 #     F: num_of_features
 #
 # Model output: (*, 5)
+# 
+#     5: 5 sleep stages
 
 
 class TemporalAttention(Layer):
@@ -139,11 +142,26 @@ class SpatialAttention(Layer):
         return (input_shape[0],input_shape[2],input_shape[2])
 
 
-def F_norm(weight_matrix, Falpha):
+def diff_loss(diff, S):
     '''
-    compute F Norm
+    compute the 1st loss of L_{graph_learning}
     '''
-    return Falpha * K.sum(weight_matrix ** 2)
+    if len(S.shape)==4:
+        # batch input
+        return K.mean(K.sum(K.sum(diff**2,axis=3)*S, axis=(1,2)))
+    else:
+        return K.sum(K.sum(diff**2,axis=2)*S)
+
+
+def F_norm_loss(S, Falpha):
+    '''
+    compute the 2nd loss of L_{graph_learning}
+    '''
+    if len(S.shape)==3:
+        # batch input
+        return Falpha * K.sum(K.mean(S**2,axis=0))
+    else:
+        return Falpha * K.sum(S**2)
 
 
 class Graph_Learn(Layer):
@@ -155,7 +173,8 @@ class Graph_Learn(Layer):
     '''
     def __init__(self, alpha, **kwargs):
         self.alpha = alpha
-        self.S = tf.convert_to_tensor(0.0)
+        self.S = tf.convert_to_tensor([[[0.0]]])  # similar to placeholder
+        self.diff = tf.convert_to_tensor([[[[0.0]]]])  # similar to placeholder
         super(Graph_Learn, self).__init__(**kwargs)
 
     def build(self, input_shape):
@@ -164,7 +183,9 @@ class Graph_Learn(Layer):
                                  shape=(num_of_features, 1),
                                  initializer='uniform',
                                  trainable=True)
-        self.add_loss(F_norm(self.S,self.alpha))
+        # add loss L_{graph_learning} in the layer
+        self.add_loss(F_norm_loss(self.S,self.alpha))
+        self.add_loss(diff_loss(self.diff,self.S))
         super(Graph_Learn, self).build(input_shape)
 
     def call(self, x):
@@ -172,16 +193,17 @@ class Graph_Learn(Layer):
         _, T, V, F = x.shape
         N = tf.shape(x)[0]
         
-        # shape: (N,V,F) use the current slice
-        x = x[:,int(int(x.shape[1])/2),:,:]
+        # shape: (N,V,F) use the current slice (middle one slice)
+        x = x[:,int(x.shape[1])//2,:,:]
+        # shape: (N,V,V,F)
+        diff = tf.transpose(tf.transpose(tf.broadcast_to(x,[V,N,V,F]), perm=[2,1,0,3])-x, perm=[1,0,2,3])
         # shape: (N,V,V)
-        diff = tf.transpose(tf.broadcast_to(x,[V,N,V,F]), perm=[2,1,0,3]) - x
-        # shape: (N,V,V)
-        tmpS = K.exp(K.reshape(K.dot(tf.transpose(K.abs(diff), perm=[1,0,2,3]), self.a), [N,V,V]))
+        tmpS = K.exp(K.relu(K.reshape(K.dot(K.abs(diff), self.a), [N,V,V])))
         # normalization
-        S = tmpS / tf.transpose(tf.broadcast_to(K.sum(tmpS,axis=1),[V,N,V]), perm=[1,2,0])
+        S = tmpS / K.sum(tmpS,axis=1,keepdims=True)
         
-        self.S = K.mean(S,axis=0)
+        self.diff = diff
+        self.S = S
         return S
 
     def compute_output_shape(self, input_shape):
@@ -216,25 +238,30 @@ class cheb_conv_with_SAt_GL(Layer):
     def call(self, x):
         #Input:  [x,SAtt,S]
         assert isinstance(x, list)
-        assert len(x)==3,'cheb_gcn error'
-        x,spatial_attention,W=x
+        assert len(x)==3,'cheb_conv_with_SAt_GL: number of input error'
+        x, spatial_attention, W = x
         _, num_of_timesteps, num_of_vertices, num_of_features = x.shape
         #Calculating Chebyshev polynomials
         D = tf.matrix_diag(K.sum(W,axis=1))
         L = D - W
         '''
-        Here may report an error which may due to TensorFlow's version, consider to change the size of batch_size or directly edit the following line to "lambda_max = 2".
+        Here we approximate λ_{max} to 2 to simplify the calculation.
+        For more general calculations, please refer to here:
+            lambda_max = K.max(tf.self_adjoint_eigvals(L),axis=1)
+            L_t = (2 * L) / tf.reshape(lambda_max,[-1,1,1]) - [tf.eye(int(num_of_vertices))]
         '''
-        lambda_max = K.max(tf.self_adjoint_eigvals(L),axis=1)
-        L_t = (2 * L) / tf.reshape(lambda_max,[-1,1,1]) - [tf.eye(int(num_of_vertices))]
+        lambda_max = 2.0
+        L_t = (2 * L) / lambda_max - [tf.eye(int(num_of_vertices))]
         cheb_polynomials = [tf.eye(int(num_of_vertices)), L_t]
         for i in range(2, self.k):
             cheb_polynomials.append(2 * L_t * cheb_polynomials[i - 1] - cheb_polynomials[i - 2])
-        #GCN
+        
+        #Graph Convolution
         outputs=[]
         for time_step in range(num_of_timesteps):
             # shape of x is (batch_size, V, F)
             graph_signal = x[:, time_step, :, :]
+            # shape of x is (batch_size, V, F')
             output = K.zeros(shape = (tf.shape(x)[0], num_of_vertices, self.num_of_filters))
             
             for kk in range(self.k):
@@ -260,7 +287,7 @@ class cheb_conv_with_SAt_GL(Layer):
         # shape: (n, num_of_timesteps, num_of_vertices, num_of_filters)
         return (input_shape[0][0],input_shape[0][1],input_shape[0][2],self.num_of_filters)
 
-    
+
 class cheb_conv_with_SAt_static(Layer):
     '''
     K-order chebyshev graph convolution with static graph structure
@@ -288,14 +315,15 @@ class cheb_conv_with_SAt_static(Layer):
     def call(self, x):
         #Input:  [x,SAtt]
         assert isinstance(x, list)
-        assert len(x)==2,'cheb_gcn error'
-        x,spatial_attention = x
+        assert len(x)==2,'cheb_conv_with_SAt_static: number of input error'
+        x, spatial_attention = x
         _, num_of_timesteps, num_of_vertices, num_of_features = x.shape
         
         outputs=[]
         for time_step in range(num_of_timesteps):
             # shape is (batch_size, V, F)
             graph_signal = x[:, time_step, :, :]
+            # shape is (batch_size, V, F')
             output = K.zeros(shape = (tf.shape(x)[0], num_of_vertices, self.num_of_filters))
             
             for kk in range(self.k):
@@ -323,8 +351,11 @@ class cheb_conv_with_SAt_static(Layer):
 
 
 def reshape_dot(x):
-    #Input:  [x,TAtt]
-    x,temporal_At = x
+    '''
+    Apply temporal attention to x
+    Input:  [x, TAtt]
+    '''
+    x, temporal_At = x
     return tf.reshape(
         K.batch_dot(
             tf.reshape(tf.transpose(x,perm=[0,2,3,1]),(tf.shape(x)[0], -1, tf.shape(x)[1])), 
@@ -335,16 +366,13 @@ def reshape_dot(x):
 
 
 def LayerNorm(x):
-    # do the layer normalization
-    x_residual,time_conv_output=x
-    relu_x=K.relu(x_residual+time_conv_output)
-    ln=tf.contrib.layers.layer_norm(relu_x,begin_norm_axis=3)
+    '''
+    Apply relu and layer normalization
+    '''
+    x_residual, time_conv_output = x
+    relu_x = K.relu(x_residual + time_conv_output)
+    ln = tf.contrib.layers.layer_norm(relu_x, begin_norm_axis=3)
     return ln
-
-
-def Transpose(x, perm):
-    # packaged Transpose
-    return tf.transpose(x,perm = perm)
 
 
 def GraphSleepBlock(x, k, num_of_chev_filters, num_of_time_filters, time_conv_strides, cheb_polynomials, time_conv_kernel, useGL, GLalpha, i=0):
@@ -354,21 +382,27 @@ def GraphSleepBlock(x, k, num_of_chev_filters, num_of_time_filters, time_conv_st
     x: input
     '''
         
-    # shape is (batch_size, T, T)   
+    # TemporalAttention 
+    # output shape is (batch_size, T, T)
     temporal_At = TemporalAttention()(x)
     x_TAt = Lambda(reshape_dot,name='reshape_dot'+str(i))([x,temporal_At])
 
-    # cheb gcn with spatial attention
+    # SpatialAttention
+    # output shape is (batch_size, V, V)
     spatial_At = SpatialAttention()(x_TAt)
     
+    # Graph Convolution with spatial attention
+    # output shape is (batch_size, T, V, F)
     if useGL:
+        # use adaptive Graph Learn
         S = Graph_Learn(alpha=GLalpha)(x)
         spatial_gcn = cheb_conv_with_SAt_GL(num_of_filters=num_of_chev_filters, k=k)([x, spatial_At, S])
     else:
+        # use fix graph structure
         spatial_gcn = cheb_conv_with_SAt_static(num_of_filters=num_of_chev_filters, k=k, cheb_polynomials=cheb_polynomials)([x, spatial_At])
     
-    # convolution along time axis
-    ''' Output: batch_size, num_of_timesteps, num_of_vertices, num_of_time_filters)'''
+    # Temporal Convolution
+    # output shape is (batch_size, T, V, F')
     time_conv_output = layers.Conv2D(
         filters = num_of_time_filters, 
         kernel_size = (time_conv_kernel, 1), 
